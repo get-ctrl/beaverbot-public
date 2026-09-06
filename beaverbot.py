@@ -60,7 +60,7 @@ async def on_message_create(meta):
     if msg.content.startswith("!beaver"):
         await reply(msg, random.choice(BEAVER_GIFS))
         return
-    if random.randrange(0,20) == 10:
+    if random.randrange(0,10) == 5:
         await reply(msg, random.choice(BEAVER_GIFS))
         return
 
