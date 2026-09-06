@@ -1,12 +1,14 @@
 
 
 import asyncio
-import requests
 import random
-import json
 
-from discord import DiscordBot
-from discordmeta import Meta, Message, Author
+from discord import (
+    Meta,
+    Author,
+    Message,
+    DiscordBot
+)
 
 BOT_TOKEN = ""
 
@@ -21,53 +23,20 @@ BEAVER_GIFS = [
     "https://tenor.com/view/beaver-silent-beaver-silentbeaver-cute-beaver-beaver-cute-gif-2665101477743541514",
 ]
 
-HTTP_REPLY = {
-    "content": "",
-    "nonce": None,
-    "tts": False,
-    "message_reference":{
-    },
-    "allowed_mentions":{
-        "parse":[
-            "users",
-            "roles",
-            "everyone"
-            ],
-        "replied_user": True
-    },
-    "flags":0
-}
-
-http = requests.Session()
-http.headers = {
-    "Authorization": f"Bot {BOT_TOKEN}",
-    "Content-Type": "application/json",
-}
-
-async def reply(msg, content):
-    data = HTTP_REPLY.copy()
-    if msg.guild_id:
-        data["message_reference"]["guild_id"] = msg.guild_id
-    data["message_reference"]["channel_id"] = msg.channel_id
-    data["message_reference"]["message_id"] = msg.id
-    data["content"] = content
-    url = "https://discord.com/api/v9/channels/{0}/messages".format(msg.channel_id)
-    req = http.post(url, data=json.dumps(data))
-    return req
+bot = DiscordBot(BOT_TOKEN)
 
 async def on_message_create(meta):
     msg = Message(meta)
-    if msg.content.startswith("!beaver"):
-        await reply(msg, random.choice(BEAVER_GIFS))
-        return
-    if random.randrange(0,10) == 5:
-        await reply(msg, random.choice(BEAVER_GIFS))
-        return
+    if random.randint(0,10) == 5:
+        await bot.reply(msg, random.choice(BEAVER_GIFS))
 
-async def main():
-    bot = DiscordBot(BOT_TOKEN)
-    bot.events = {"MESSAGE_CREATE": [on_message_create]}
-    await bot.start()
-    print("ok")
+async def cmd_beaver(msg):
+    await bot.reply(msg, random.choice(BEAVER_GIFS))
 
-asyncio.run(main())
+bot = DiscordBot(BOT_TOKEN)
+bot.events = {"MESSAGE_CREATE": [on_message_create]}
+bot.commands = {
+    "beaver": cmd_beaver
+}
+
+asyncio.run(bot.start())
