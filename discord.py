@@ -1,10 +1,112 @@
 
 
 import asyncio
-import websockets
 import json
-from discordstructs import msg_create_heartbeat, msg_create_hello
-from discordmeta import Meta, Author, Message
+
+import websockets
+import requests
+
+
+class DataMap:
+
+    def __init__(self, data):
+        self.__dict__["data"] = data
+    
+    def __getattr__(self, name):
+        if not name in self.data: return None
+        value = self.data[name]
+        if isinstance(value, dict): return DataMap(value)
+        else: return value
+    
+    def __setattr__(self, name, value):
+        self.data[name] = value
+    
+    def __repr__(self):
+        return repr(self.data)
+
+class Meta(DataMap):
+
+    op: int
+    t: str
+    s: int
+    d: dict
+
+    def __init__(self, data):
+        super().__init__(data)
+
+class Author(DataMap):
+
+    id: str
+    username: str
+    global_name: str
+    clan: str
+    avatar: str
+
+    def __init__(self, meta):
+        super().__init__(meta.data)
+
+class Message(DataMap):
+
+    id: str
+    channel_id: str
+    guild_id: str
+    content: str
+    attachments: list
+    mentions: list
+    mention_roles: list
+    mention_everyone: bool
+    author: Author
+    meta: Meta
+
+    def __init__(self, meta):
+        super().__init__(meta.d.data)
+        self.author = Author(meta.d.author)
+        self.meta = meta
+
+
+WS_HELLO = {
+   "op": 2,
+   "d": {
+      "token": "",
+      "intents": 33280,
+      "properties": {
+         "os": "TempleOS",
+         "browser": "HolyBrowser",
+         "device": "ComputerOfGod"
+      },
+      "compress": False,
+   }
+}
+
+WS_HEARTBEAT = {
+    "op": 1,
+    "d": {
+        "token": "",
+        "properties": {
+            "os": "TempleOS",
+            "browser": "HolyBrowser",
+            "device": "ComputerOfGod"
+        },
+    }
+}
+
+HTTP_REPLY = {
+    "content": "",
+    "nonce": None,
+    "tts": False,
+    "message_reference":{
+    },
+    "allowed_mentions":{
+        "parse":[
+            "users",
+            "roles",
+            "everyone"
+            ],
+        "replied_user": True
+    },
+    "flags":0
+}
+
 
 class DiscordBot:
 
@@ -19,12 +121,14 @@ class DiscordBot:
         self.events = {}
         self.commands = {}
         self.prefix = "!"
+        self.http = requests.Session()
+        self.http.headers = { "Authorization": f"Bot {self.token}", "Content-Type": "application/json" }
     
     async def connect(self):
         print("[~] Connect")
         if self.client: return
         self.client = await websockets.connect("wss://gateway.discord.gg/?v=10&encoding=json", max_size=5_000_000)
-        await self.client.send(msg_create_hello(self.token))
+        await self.client.send(self.build_hello_msg())
         print("[~] Hello")
         self.heartbeat_task = asyncio.create_task(self.heartbeat())
         self.running = True
@@ -46,10 +150,32 @@ class DiscordBot:
         while self.running and self.client:
             await asyncio.sleep(self.heartbeat_interval)
             if not self.running or not self.client: continue
-            msg = msg_create_heartbeat(self.token, self.heartbeat_sequence)
+            msg = self.build_heartbeat_msg()
             await self.client.send(msg)
             print("[~] Heartbeat")
     
+    async def reply(self, msg, content):
+        data = HTTP_REPLY.copy()
+        if msg.guild_id:
+            data["message_reference"]["guild_id"] = msg.guild_id
+        data["message_reference"]["channel_id"] = msg.channel_id
+        data["message_reference"]["message_id"] = msg.id
+        data["content"] = content
+        url = "https://discord.com/api/v9/channels/{0}/messages".format(msg.channel_id)
+        req = self.http.post(url, data=json.dumps(data))
+        return req
+    
+    def build_hello_msg(self):
+        data = WS_HELLO.copy()
+        data["d"]["token"] = self.token
+        return json.dumps(data)
+    
+    def build_heartbeat_msg(self):
+        data = WS_HEARTBEAT.copy()
+        data["d"]["token"] = self.token
+        data["d"]["s"] = self.heartbeat_sequence
+        return json.dumps(data)
+
     async def core(self): # cpu well
         while self.running and self.client:
             try:
@@ -60,7 +186,7 @@ class DiscordBot:
                     case 9:
                         await self.reconnect()
                     case 10:
-                        self.heartbeat_interval = meta.d["heartbeat_interval"] / 1000
+                        self.heartbeat_interval = meta.d.heartbeat_interval / 1000
                 if meta.s: self.heartbeat_sequence = meta.s
                 asyncio.create_task(self.on_message(meta))
             except Exception as ex:
@@ -78,11 +204,22 @@ class DiscordBot:
     
     async def on_message(self, meta):
         events = self.events.get(meta.t)
-        if not events: return
-        for event in events:
-            try: await event(meta)
-            except Exception as ex:
-                print("[!] Event exception\n{0}".format(ex))
+        if events:
+            for event in events:
+                try: await event(meta)
+                except Exception as ex:
+                    print("[!] Event exception\n{0}".format(ex))
+        if meta.t == "MESSAGE_CREATE":
+            await self.on_message_create(meta)
+    
+    async def on_message_create(self, meta):
+        msg = Message(meta)
+        if not msg.content.startswith(self.prefix): return
+        for command in self.commands.keys():
+            if msg.content.startswith(self.prefix + command):
+                try: await self.commands[command](msg)
+                except Exception as ex:
+                    print("[!] Command failure: {0}".format(ex))
     
     async def start(self): # cpu well
         self.isalive = True
