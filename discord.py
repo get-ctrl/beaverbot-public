@@ -11,11 +11,14 @@ class DiscordBot:
     def __init__(self, token):
         self.token = token
         self.client = None
+        self.isalive = False
         self.running = False
         self.heartbeat_task = None
         self.heartbeat_interval = 40
         self.heartbeat_sequence = 0
         self.events = {}
+        self.commands = {}
+        self.prefix = "!"
     
     async def connect(self):
         print("[~] Connect")
@@ -61,7 +64,7 @@ class DiscordBot:
                 if meta.s: self.heartbeat_sequence = meta.s
                 asyncio.create_task(self.on_message(meta))
             except Exception as ex:
-                print("[!] Core exception\n{0}".format(ex.Message))
+                print("[!] Core exception\n{0}".format(ex))
                 await self.reconnect()
     
     async def recv_message(self):
@@ -79,14 +82,14 @@ class DiscordBot:
         for event in events:
             try: await event(meta)
             except Exception as ex:
-                print("[!] Event exception\n{0}".format(ex.Message))
+                print("[!] Event exception\n{0}".format(ex))
     
     async def start(self): # cpu well
-        self.running = True
-        while self.running:
+        self.isalive = True
+        while self.isalive:
             await self.reconnect()
-            await asyncio.sleep(1)
             await self.core()
     
     async def stop(self):
+        self.isalive = False
         await self.disconnect()
