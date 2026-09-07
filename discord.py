@@ -125,24 +125,30 @@ class DiscordBot:
         self.http.headers = { "Authorization": f"Bot {self.token}", "Content-Type": "application/json" }
     
     async def connect(self):
+        self.running = True
         print("[~] Connect")
         if self.client: return
         self.client = await websockets.connect("wss://gateway.discord.gg/?v=10&encoding=json", max_size=5_000_000)
         await self.client.send(self.build_hello_msg())
         print("[~] Hello")
         self.heartbeat_task = asyncio.create_task(self.heartbeat())
-        self.running = True
+        await asyncio.sleep(1)
     
     async def disconnect(self):
         print("[~] Disconnect")
-        if self.client: await self.client.close()
-        if self.heartbeat_task: self.heartbeat_task.cancel()
         self.running = False
+        if self.client:
+            await self.client.close()
+            self.client = None
+        if self.heartbeat_task:
+            self.heartbeat_task.cancel()
+            self.heartbeat_task = None
+        self.heartbeat_sequence = 0
+        await asyncio.sleep(1)
     
     async def reconnect(self):
         print("[~] Reconnect")
         await self.disconnect()
-        await asyncio.sleep(1)
         await self.connect()
     
     async def heartbeat(self): # cpu well
@@ -177,9 +183,13 @@ class DiscordBot:
         return json.dumps(data)
 
     async def core(self): # cpu well
+        print("[~] Core")
+        print(self.running)
+        print(self.client)
         while self.running and self.client:
             try:
                 meta = await self.recv_message()
+                if meta == None: continue
                 match meta.op:
                     case 7:
                         await self.reconnect()
@@ -192,6 +202,7 @@ class DiscordBot:
             except Exception as ex:
                 print("[!] Core exception\n{0}".format(ex))
                 await self.reconnect()
+        print("[~] Core exit")
     
     async def recv_message(self):
         if not self.client: return None
@@ -201,6 +212,7 @@ class DiscordBot:
             return Meta(data)
         except:
             return None
+        print("[~] Recv message")
     
     async def on_message(self, meta):
         events = self.events.get(meta.t)
@@ -220,12 +232,15 @@ class DiscordBot:
                 try: await self.commands[command](msg)
                 except Exception as ex:
                     print("[!] Command failure: {0}".format(ex))
+                break
     
     async def start(self): # cpu well
         self.isalive = True
         while self.isalive:
+            print("[~] Core loop")
             await self.reconnect()
             await self.core()
+            await asyncio.sleep(10)
     
     async def stop(self):
         self.isalive = False
